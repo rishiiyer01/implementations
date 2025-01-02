@@ -2,7 +2,7 @@
 import torch
 import math
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 
 class RotaryPositionEmbedding(nn.Module):
@@ -76,3 +76,43 @@ class RotaryPositionEmbedding(nn.Module):
         # Apply rotation using complex number multiplication:
         # (a + ib)(cos θ + i sin θ) = (a cos θ - b sin θ) + i(a sin θ + b cos θ)
         return (x * cos) + (self._rotate_half(x) * sin)
+    
+
+
+
+
+
+class Attention(nn.Module):
+    def __init__(self, hidden_dim, num_heads=8):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        
+        self.qkv = nn.Linear(hidden_dim, hidden_dim * 3)
+        self.proj = nn.Linear(hidden_dim, hidden_dim)
+        self.rope=RotaryPositionEmbedding(self.head_dim)
+        self.scale = self.head_dim ** -0.5
+        
+    def forward(self, x):
+        B, N,dim = x.shape
+        
+        # QKV projection
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        #print(q.shape)
+        q=q+self.rope(q)
+        k=k+self.rope(k)
+        
+        # Attention
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        
+        # Create causal mask
+        causal_mask = torch.triu(torch.ones(N, N), diagonal=1).bool()
+        attn = attn.masked_fill(causal_mask.to(attn.device), float('-inf'))
+        
+        attn = F.softmax(attn, dim=-1)
+        x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
+        
+        # Output projection
+        x = self.proj(x)
+        return x
