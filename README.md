@@ -1,0 +1,1 @@
+This a personal library of custom methods/functions I often have to rewrite. I mainly import or copy paste and edit the classes. I did this just in case anyone wants to use them to start their own personal torch library.
