@@ -53,6 +53,7 @@ class MoE(nn.Module):
   
 
 #topk sigmoid moe layer, no entropy regularization or loss output
+#remember to add all_gather and scatter operations for expert parallelism in implementations that need that
 class sigMoE(nn.Module):
   def __init__(self, num_experts, hidden_size, ffn_hidden_size,k=1):
     super().__init__()
