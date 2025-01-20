@@ -47,7 +47,8 @@ class MoE(nn.Module):
       out[mask,:]=expert(x[mask])
       print(out.shape,p.shape)
 
-    output=p.unsqueeze(-1)*out
+    #output=p.unsqueeze(-1)*out
+    output=out #for topk=1
 
     return output
   
@@ -70,7 +71,7 @@ class sigMoE(nn.Module):
     # x: (B, S, H)
     B,S,H=x.shape
     scores = self.router(x) # (B, S, E)
-    probs_0 = F.sigmoid(scores) # (B, S, E)
+    probs_0 = F.softmax(scores,dim=-1) # (B, S, E)
     p,expert_id=torch.topk(probs_0,self.k,dim=-1) #(B,S,K)
     p=p.unsqueeze(-1) #B,S,K,1
     out=torch.zeros((B,S,self.k,H))
@@ -79,12 +80,12 @@ class sigMoE(nn.Module):
     for i, expert in enumerate(self.experts):
       #mask=(expert_id==i) #3 dimensional slice (B,S,k)
       B,S,K=torch.where(expert_id==i)
-      print(x[B,S,:].shape)
+      #print(x[B,S,:].shape)
       
       out[B,S,K,:]=expert(x[B,S,:])
-      print(out.shape,p.shape)
+      #print(out.shape,p.shape)
+    p=p/p.sum(dim=2)
     output=(p*out).sum(dim=2)
-    
     return output
   
 #x = torch.randn((2, 3, 5))
