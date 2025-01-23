@@ -158,7 +158,7 @@ class ffMoE(nn.Module):
             output_local = torch.empty((b, s, h), device=device)
             torch.distributed.scatter(output_local, output_total)
             p=p/p.sum(dim=2)
-            output=(p*out).sum(dim=2)
+            output=(p*output_local).sum(dim=2)
         return output
 #x = torch.randn((2, 3, 5))
 #moe = sigMoE(4, 5, 20,k=2)
