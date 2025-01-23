@@ -144,7 +144,7 @@ class ffMoE(nn.Module):
             p,expert_id=torch.topk(probs_0,self.k,dim=-1) #(B,S,K)
             p=p.unsqueeze(-1) #B,S,K,1
             out=torch.empty((b,s,self.k,h))
-            global_out=torch.empty((self.world_size*b,s,self.k,h),device=device) # each gpu will have it's data parallel we need to grab
+            #global_out=torch.empty((self.world_size*b,s,self.k,h),device=device) # each gpu will have it's data parallel we need to grab
             global_expert_id=torch.empty((self.world_size*b,s,self.k),device=device)
             torch.distributed.all_gather(global_expert_id,expert_id) 
             global_x=torch.empty((self.world_size*b,s,h),device=device) #gathers x from dp
