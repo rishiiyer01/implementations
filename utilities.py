@@ -100,8 +100,8 @@ class Attention(nn.Module):
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
         #print(q.shape)
-        q=q+self.rope(q)
-        k=k+self.rope(k)
+        q=self.rope(q)
+        k=self.rope(k)
         
         # Attention
         attn = (q @ k.transpose(-2, -1)) * self.scale
