@@ -141,7 +141,7 @@ class MultiLatentAttention(nn.Module):
         #output proj
         self.o_proj = nn.Linear(hidden_dim, hidden_dim)
         self.rope=RotaryPositionEmbedding(self.head_dim)
-        self.scale = self.head_dim ** -0.5
+        self.scale = (2*self.head_dim) ** -0.5
 
     def forward(self, x):
         #layer norm prior to input
