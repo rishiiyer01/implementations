@@ -184,7 +184,7 @@ class MultiLatentAttention(nn.Module):
         return x
 
 
-#just qkv in case you want to use flash attention or flex attention
+#just qkv in case you want to use flash attention 
 class MultiLatentQKV(nn.Module):
     def __init__(self,hidden_dim,num_heads=8,low_rank=2):
         super().__init__()
@@ -229,5 +229,55 @@ class MultiLatentQKV(nn.Module):
         v=self.v_up_proj(low_rank_kv) 
         v=v.reshape(B,N,self.num_heads,self.head_dim).permute(0,2,1,3)
         
+
         return q,k,v
+    
+#for compiled flex attention we need q,k,v with the same embedding dimension
+class AltMultiLatentQKV(nn.Module):
+    def __init__(self,hidden_dim,num_heads=8,low_rank=2):
+        super().__init__()
+        self.num_heads=num_heads
+        self.head_dim=hidden_dim//num_heads
+        #assert hidden_dim//num_heads
+        #downproj for q
+        self.qd_proj=nn.Linear(hidden_dim,hidden_dim//low_rank)
+        self.qu_proj=nn.Linear(hidden_dim//low_rank,hidden_dim)
+        self.qr_proj=nn.Linear(hidden_dim,self.head_dim//2)
+        #shared downproj for k,v
+        self.kvd=nn.Linear(hidden_dim,hidden_dim//low_rank)
+        self.v_up_proj=nn.Linear(hidden_dim//low_rank,hidden_dim)
+        self.k_up_proj=nn.Linear(hidden_dim//low_rank,hidden_dim)
+        self.kr_proj=nn.Linear(hidden_dim,self.head_dim//2)
+        self.rope=RotaryPositionEmbedding(self.head_dim)
+        
+
+    def forward(self, x):
+        #layer norm prior to input
+        B, N,dim = x.shape
+        
+        # query projections
+        qd=self.qd_proj(x) #B,N,low_rank_dim
+        qr=self.qr_proj(x).unsqueeze(2)# B,N,1,head_dim
+        qr=qr.expand(-1,-1,self.num_heads,-1).permute(0,2,1,3) #B,num_heads,seq_len,head_dim
+        qr=self.rope(qr)
+        q=self.qu_proj(qd) #B,N,dim
+        q=q.reshape(B,N,self.num_heads,self.head_dim).permute(0,2,1,3)
+        q=torch.cat((q,qr),dim=-1) #B,num_heads,seq_len,head_dim*2
+
+        #keys
+        low_rank_kv=self.kvd(x)
+        k=self.k_up_proj(low_rank_kv)
+        kr=self.kr_proj(x).unsqueeze(2)
+        kr=kr.expand(-1,-1,self.num_heads,-1).permute(0,2,1,3)
+        kr=self.rope(kr)
+        k= k.reshape(B,N,self.num_heads,self.head_dim).permute(0,2,1,3)
+        k=torch.cat((k,kr),dim=-1) #B,num_heads,seq_len,head_dim*2
+        
+        #values
+        v=self.v_up_proj(low_rank_kv) 
+        v=v.reshape(B,N,self.num_heads,self.head_dim).permute(0,2,1,3)
+        
+        return q,k,v
+
+
 
