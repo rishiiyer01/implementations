@@ -116,7 +116,29 @@ class ffMoE(nn.Module):
         start_idx = self.rank * experts_per_rank
         end_idx = start_idx + experts_per_rank
         self.local_experts_ids = list(range(start_idx, end_idx))
-        self.local_experts = nn.ModuleList([FeedForward(hidden_size) for _ in range(experts_per_rank)])
+        self.local_experts = nn.ModuleList([MLP(hidden_size) for _ in range(experts_per_rank)])
+
+
+
+        #load balancing
+        self.gamma=0.001 #from deepseek v3
+        self.register_buffer('b', torch.zeros(num_experts))
+        self.register_buffer('uniform', torch.ones(num_experts)/num_experts)
+        
+
+    def load_balancing(self,s):
+        #auxiliary free load balancing
+        #it is pretty annoying to use a loss, so deepseeks method is pretty nice
+        meanscores=s.mean(dim=[0,1])
+        diff=meanscores-self.uniform #if diff>0 then we subtract if diff<0 then we add 
+        s=s+self.b #b broadcasted
+        #update bias
+        self.b=self.b-(torch.sign(diff)*self.gamma)
+        torch.distributed.all_reduce(self.b, op=torch.distributed.ReduceOp.SUM)
+        self.b /= self.world_size
+        _,expert_id=torch.topk(s,self.k,dim=-1) 
+       
+        return expert_id
 
     def forward(self, x):
         # x: (B, S, H)
@@ -124,10 +146,11 @@ class ffMoE(nn.Module):
         b,s,h=x.shape
         scores = self.router(x) # (B, S, E)
         probs_0 = F.softmax(scores,dim=-1) # (B, S, E)
-        p,expert_id=torch.topk(probs_0,self.k,dim=-1) #(B,S,K)
+        expert_id=self.load_balancing(probs_0)
+        p,_=torch.topk(probs_0,self.k,dim=-1) #(B,S,K) #you could use this topk for expert routing, but we need aux free load balancing
         p=p.unsqueeze(-1) #B,S,K,1
-        out=torch.empty((b,s,self.k,h))
-        global_out=torch.empty((self.world_size*b,s,self.k,h),device=device,dtype=x.dtype) # each gpu will have it's data parallel we need to grab
+        #out=torch.empty((b,s,self.k,h))
+        #global_out=torch.empty((self.world_size*b,s,self.k,h),device=device,dtype=x.dtype) # each gpu will have it's data parallel we need to grab
         global_expert_id=torch.empty((self.world_size*b,s,self.k),device=device,dtype=expert_id.dtype)
         torch.distributed.all_gather_into_tensor(global_expert_id,expert_id) 
         global_x=torch.empty((self.world_size*b,s,h),device=device,dtype=x.dtype) #gathers x from dp
@@ -143,9 +166,17 @@ class ffMoE(nn.Module):
         #output_local_list=[torch.empty((b,s,h)) for _ in range(self.world_size)]
         #output_total_list=list(torch.tensor_split(output_total,self.world_size,dim=0))
         torch.distributed.reduce_scatter_tensor(output_local, output_total) 
-        p=p/(p.sum(dim=2).unsqueeze(2))
+        p=p/(p.sum(dim=2).unsqueeze(2)) #p normalization 
         output=(p*output_local).sum(dim=2)
+
+
         return output
+    
+
+
+
+
+
 #x = torch.randn((2, 3, 5))
 #moe = sigMoE(4, 5, 20,k=2)
 #print(x)
